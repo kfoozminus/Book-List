@@ -5,146 +5,102 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"strconv"
 
 	"github.com/bmizerany/pat"
 )
 
-var storage = make(map[string][]string)
-var mu sync.Mutex
-
-type data struct {
-	Author string
-	Book   string
+type Book struct {
+	Id     int    `json:"id,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Author string `json:"author,omitempty"`
 }
 
-type updateData struct {
-	Old string
-	New string
+type Response struct {
+	Success int    `json:"success,omitempty"`
+	Message string `json:"message,omitempty"`
+	Book    []Book `json:"book,omitempty"`
 }
 
-func home(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Welcome to the booklist!")
+var bookList []Book
+
+//var mu sync.Mutex
+var ind int
+
+func homePage(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "Welcome to the BookList RESTful API!")
 }
 
-func adder(w http.ResponseWriter, r *http.Request) {
+func addBook(w http.ResponseWriter, r *http.Request) {
 
-	mu.Lock()
+	ind++
+	var book Book
+	_ = json.NewDecoder(r.Body).Decode(&book)
+	book.Id = ind
+	bookList = append(bookList, book)
+	var _Book []Book
+	json.NewEncoder(w).Encode(Response{Success: 1, Message: "Added Book Successfully!", Book: append(_Book, book)})
+}
 
-	if r.Method == "GET" {
-
-		author := r.URL.Query().Get(":author")
-		book := r.URL.Query().Get(":book")
-		storage[author] = append(storage[author], book)
-
+func showBooks(w http.ResponseWriter, r *http.Request) {
+	//if bookList is empty
+	if len(bookList) == 0 {
+		json.NewEncoder(w).Encode(Response{Success: 1, Message: "No Book Added Yet"})
 	} else {
-
-		var value data
-		defer r.Body.Close()
-		err := json.NewDecoder(r.Body).Decode(&value)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			storage[value.Author] = append(storage[value.Author], value.Book)
-		}
-
-	}
-
-	mu.Unlock()
-}
-
-func changeAuthorBooks(old, new string) {
-	if old != new {
-		for _, book := range storage[old] {
-			storage[new] = append(storage[new], book)
-		}
-		delete(storage, old)
+		json.NewEncoder(w).Encode(Response{Success: 1, Message: "The Book List", Book: bookList})
 	}
 }
 
-func updateAuthor(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-
-	if r.Method == "GET" {
-		old := r.URL.Query().Get(":old")
-		new := r.URL.Query().Get(":new")
-		changeAuthorBooks(old, new)
-	} else {
-
-		var value updateData
-		defer r.Body.Close()
-		err := json.NewDecoder(r.Body).Decode(&value)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			old := value.Old
-			new := value.New
-			changeAuthorBooks(old, new)
+func deleteBook(w http.ResponseWriter, r *http.Request) {
+	var delBook Book
+	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
+	if err != nil {
+		//not valid
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid ID"})
+		return
+	}
+	for i, book := range bookList {
+		if book.Id == id {
+			delBook = book
+			bookList = append(bookList[:i], bookList[i+1:]...)
+			//json.NewEncoder(w).Encode(delBook)
+			var _Book []Book
+			json.NewEncoder(w).Encode(Response{Success: 1, Message: "Deleted Book Successfully!", Book: append(_Book, delBook)})
+			return
 		}
 	}
-	mu.Unlock()
-}
-
-func changeBooks(old, new string) {
-	for _, books := range storage {
-		for i, book := range books {
-			if book == old {
-				books[i] = new
-				return
-			}
-		}
-	}
+	//not found
+	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
 func updateBook(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-
-	if r.Method == "GET" {
-		old := r.URL.Query().Get(":old")
-		new := r.URL.Query().Get(":new")
-		changeBooks(old, new)
-	} else {
-
-		var value updateData
-		defer r.Body.Close()
-		err := json.NewDecoder(r.Body).Decode(&value)
-
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			old := value.Old
-			new := value.New
-			changeBooks(old, new)
+	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
+	if err != nil {
+		//not valid
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid ID"})
+		return
+	}
+	for i, book := range bookList {
+		if book.Id == id {
+			_ = json.NewDecoder(r.Body).Decode(&bookList[i])
+			bookList[i].Id = id
+			var _Book []Book
+			json.NewEncoder(w).Encode(Response{Success: 1, Message: "Updated Book Info Successfully!", Book: append(_Book, bookList[i])})
+			return
 		}
 	}
-	mu.Unlock()
-}
-
-func show(w http.ResponseWriter, r *http.Request) {
-	for author, books := range storage {
-		fmt.Fprintln(w, author+" :")
-		for _, book := range books {
-			fmt.Fprintln(w, book)
-		}
-		fmt.Fprintln(w, "")
-	}
+	//not found
+	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
 func main() {
 
 	m := pat.New()
-	m.Get("/", http.HandlerFunc(home))
-
-	m.Get("/add/:author/:book", http.HandlerFunc(adder))
-	m.Get("/update-author/:old/:new", http.HandlerFunc(updateAuthor))
-	m.Get("/update-book/:old/:new", http.HandlerFunc(updateBook))
-	m.Get("/show", http.HandlerFunc(show))
-
-	m.Post("/add/", http.HandlerFunc(adder))
-	m.Post("/update-author/", http.HandlerFunc(updateAuthor))
-	m.Post("/update-book/", http.HandlerFunc(updateBook))
+	m.Get("/", http.HandlerFunc(homePage))
+	m.Get("/book", http.HandlerFunc(showBooks))
+	m.Post("/book/", http.HandlerFunc(addBook))
+	m.Put("/book/:id", http.HandlerFunc(updateBook))
+	m.Del("/book/:id", http.HandlerFunc(deleteBook))
 
 	http.Handle("/", m)
 	err := http.ListenAndServe(":8080", nil)
