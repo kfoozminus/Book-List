@@ -17,7 +17,7 @@ type Book struct {
 }
 
 type Response struct {
-	Success int    `json:"success,omitempty"`
+	Success int    `json:"success"`
 	Message string `json:"message,omitempty"`
 	Book    []Book `json:"book,omitempty"`
 }
@@ -39,6 +39,7 @@ func addBook(w http.ResponseWriter, r *http.Request) {
 	book.Id = ind
 	bookList = append(bookList, book)
 	var _Book []Book
+	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(Response{Success: 1, Message: "Added Book Successfully!", Book: append(_Book, book)})
 }
 
@@ -56,6 +57,7 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
 	if err != nil {
 		//not valid
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid ID"})
 		return
 	}
@@ -70,6 +72,7 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//not found
+	//w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
@@ -77,6 +80,7 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
 	if err != nil {
 		//not valid
+		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid ID"})
 		return
 	}
@@ -90,6 +94,8 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//not found
+	//w.WriteHeader(http.StatusNotFound)
+	fmt.Println(Response{Success: 0, Message: "Book Not Found"})
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
