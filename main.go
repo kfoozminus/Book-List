@@ -72,7 +72,7 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//not found
-	//w.WriteHeader(http.StatusNotFound)
+	w.WriteHeader(http.StatusNotFound)
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
@@ -94,7 +94,7 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	//not found
-	//w.WriteHeader(http.StatusNotFound)
+	w.WriteHeader(http.StatusNotFound)
 	fmt.Println(Response{Success: 0, Message: "Book Not Found"})
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
