@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/bmizerany/pat"
 )
@@ -22,9 +25,44 @@ type Response struct {
 	Book    []Book `json:"book,omitempty"`
 }
 
+type User struct {
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	Name          string `json:"name,omitempty"`
+	LastSessionID string `json:"lastsessionid,omitempty"`
+}
+
 var bookList []Book
+var userList = make(map[string]User)
 
 //var mu sync.Mutex
+
+func isAuthorized(r *http.Request) bool {
+	user, pass, err := r.BasicAuth()
+	if err == false {
+		//fmt.Println(user, pass)
+		if userList[user].Password == pass {
+			return true
+		}
+	} else {
+		cookie, err := r.Cookie("SessionID")
+		if err != nil {
+			return false
+		}
+		sessionID := cookie.Value
+		creden := strings.Split(sessionID, ":")
+		user := creden[0]
+		sessionID = creden[1]
+
+		expectedSessionID := userList[user].LastSessionID
+
+		if expectedSessionID == sessionID {
+			return true
+		}
+	}
+	return false
+}
+
 var ind int
 
 func homePage(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +87,14 @@ func addBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func showBooks(w http.ResponseWriter, r *http.Request) {
+
+	if isAuthorized(r) == false {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
+		//http.Redirect(w, r, "/home", http.StatusFound)
+		return
+	}
+
 	//if bookList is empty
 	if len(bookList) == 0 {
 		json.NewEncoder(w).Encode(Response{Success: 1, Message: "No Book Added Yet"})
@@ -58,6 +104,13 @@ func showBooks(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteBook(w http.ResponseWriter, r *http.Request) {
+	if isAuthorized(r) == false {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
+		//http.Redirect(w, r, "/home", http.StatusFound)
+		return
+	}
+
 	var delBook Book
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
 	if err != nil {
@@ -82,6 +135,13 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 }
 
 func updateBook(w http.ResponseWriter, r *http.Request) {
+	if isAuthorized(r) == false {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
+		//http.Redirect(w, r, "/home", http.StatusFound)
+		return
+	}
+
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
 	if err != nil {
 		//not valid
@@ -103,6 +163,45 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
+/*func logout(user string) {
+	userList[user].LastSessionID = ""
+}*/
+
+func login(w http.ResponseWriter, r *http.Request) {
+	if isAuthorized(r) == true {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
+		return
+	}
+
+	var user User
+	err := json.NewDecoder(r.Body).Decode(&user)
+
+	if err != nil {
+
+		if val, ok := userList[user.Username]; ok {
+
+			if user.Password == val.Password {
+
+				cookieValue := val.Username + ":" + val.Username + strconv.Itoa(rand.Intn(100000000))
+				expire := time.Now().AddDate(0, 0, 1)
+				cookie := http.Cookie{Name: "SessionID", Value: cookieValue, Expires: expire, HttpOnly: true}
+				http.SetCookie(w, &cookie)
+				json.NewEncoder(w).Encode(Response{Success: 1, Message: "Login Successful"})
+
+			} else {
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(Response{Success: 0, Message: "Password doesn't match"})
+			}
+		} else {
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(Response{Success: 0, Message: "User Not Found"})
+		}
+	}
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Login Unsuccessgul"})
+}
+
 func main() {
 
 	m := pat.New()
@@ -111,6 +210,9 @@ func main() {
 	m.Post("/book/", http.HandlerFunc(addBook))
 	m.Put("/book/:id", http.HandlerFunc(updateBook))
 	m.Del("/book/:id", http.HandlerFunc(deleteBook))
+
+	m.Post("/book/login", http.HandlerFunc(login))
+	//m.Post("/book/register", http.HandlerFunc(register))
 
 	http.Handle("/", m)
 	err := http.ListenAndServe(":8080", nil)
