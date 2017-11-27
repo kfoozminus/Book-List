@@ -202,6 +202,31 @@ func login(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Login Unsuccessgul"})
 }
 
+func register(w http.ResponseWriter, r *http.Request) {
+	if isAuthorized(r) == true {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
+		return
+	}
+
+	var user User
+	err := json.NewDecoder(r.Body).Decode(&user)
+
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid Info"})
+		return
+	}
+
+	if _, ok := userList[user.Username]; ok {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Username already exists"})
+		return
+	}
+
+	userList[user.Username] = user
+}
+
 func main() {
 
 	m := pat.New()
@@ -212,7 +237,7 @@ func main() {
 	m.Del("/book/:id", http.HandlerFunc(deleteBook))
 
 	m.Post("/book/login", http.HandlerFunc(login))
-	//m.Post("/book/register", http.HandlerFunc(register))
+	m.Post("/book/register", http.HandlerFunc(register))
 
 	http.Handle("/", m)
 	err := http.ListenAndServe(":8080", nil)
