@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bmizerany/pat"
@@ -35,30 +36,24 @@ type User struct {
 var bookList []Book
 var userList = make(map[string]User)
 
-//var mu sync.Mutex
+var mu sync.Mutex
 
 func isAuthorized(r *http.Request) bool {
-	user, pass, err := r.BasicAuth()
-	if err == false {
-		//fmt.Println(user, pass)
-		if userList[user].Password == pass {
-			return true
-		}
-	} else {
-		cookie, err := r.Cookie("SessionID")
-		if err != nil {
-			return false
-		}
-		sessionID := cookie.Value
-		creden := strings.Split(sessionID, ":")
-		user := creden[0]
-		sessionID = creden[1]
+	cookie, err := r.Cookie("SessionID")
+	if err != nil {
+		return false
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	sessionID := cookie.Value
+	creden := strings.Split(sessionID, ":")
+	user := creden[0]
+	sessionID = creden[1]
 
-		expectedSessionID := userList[user].LastSessionID
+	expectedSessionID := userList[user].LastSessionID
 
-		if expectedSessionID == sessionID {
-			return true
-		}
+	if expectedSessionID == sessionID {
+		return true
 	}
 	return false
 }
@@ -70,10 +65,19 @@ func homePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func addBook(w http.ResponseWriter, r *http.Request) {
+	//fmt.Println("here")
+	if isAuthorized(r) == false {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
+		//http.Redirect(w, r, "/home", http.StatusFound)
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
 
 	var book Book
 	err := json.NewDecoder(r.Body).Decode(&book)
-	if err != nil {
+	if err == nil {
 		ind++
 		book.Id = ind
 		bookList = append(bookList, book)
@@ -91,7 +95,6 @@ func showBooks(w http.ResponseWriter, r *http.Request) {
 	if isAuthorized(r) == false {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
-		//http.Redirect(w, r, "/home", http.StatusFound)
 		return
 	}
 
@@ -107,9 +110,10 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 	if isAuthorized(r) == false {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
-		//http.Redirect(w, r, "/home", http.StatusFound)
 		return
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
 	var delBook Book
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
@@ -123,7 +127,7 @@ func deleteBook(w http.ResponseWriter, r *http.Request) {
 		if book.Id == id {
 			delBook = book
 			bookList = append(bookList[:i], bookList[i+1:]...)
-			//json.NewEncoder(w).Encode(delBook)
+
 			var _Book []Book
 			json.NewEncoder(w).Encode(Response{Success: 1, Message: "Deleted Book Successfully!", Book: append(_Book, delBook)})
 			return
@@ -138,9 +142,10 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 	if isAuthorized(r) == false {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
-		//http.Redirect(w, r, "/home", http.StatusFound)
 		return
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
 	id, err := strconv.Atoi(r.URL.Query().Get(":id"))
 	if err != nil {
@@ -163,30 +168,30 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Book Not Found"})
 }
 
-/*func logout(user string) {
-	userList[user].LastSessionID = ""
-}*/
-
 func login(w http.ResponseWriter, r *http.Request) {
 	if isAuthorized(r) == true {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
 		return
 	}
+	//fmt.Println("meh?")
+	mu.Lock()
+	defer mu.Unlock()
 
-	var user User
-	err := json.NewDecoder(r.Body).Decode(&user)
+	user, pass, logok := r.BasicAuth()
 
-	if err != nil {
+	if logok == true {
 
-		if val, ok := userList[user.Username]; ok {
+		if val, ok := userList[user]; ok {
 
-			if user.Password == val.Password {
+			if pass == val.Password {
 
-				cookieValue := val.Username + ":" + val.Username + strconv.Itoa(rand.Intn(100000000))
+				sessionid := strconv.Itoa(rand.Intn(1000000007))
+				cookieValue := val.Username + ":" + sessionid
 				expire := time.Now().AddDate(0, 0, 1)
 				cookie := http.Cookie{Name: "SessionID", Value: cookieValue, Expires: expire, HttpOnly: true}
 				http.SetCookie(w, &cookie)
+				userList[user] = User{val.Username, val.Password, val.Name, sessionid}
 				json.NewEncoder(w).Encode(Response{Success: 1, Message: "Login Successful"})
 
 			} else {
@@ -197,9 +202,10 @@ func login(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			json.NewEncoder(w).Encode(Response{Success: 0, Message: "User Not Found"})
 		}
+	} else {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Login Unsuccessgul"})
 	}
-	w.WriteHeader(http.StatusBadRequest)
-	json.NewEncoder(w).Encode(Response{Success: 0, Message: "Login Unsuccessgul"})
 }
 
 func register(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +214,8 @@ func register(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
 		return
 	}
+	mu.Lock()
+	defer mu.Unlock()
 
 	var user User
 	err := json.NewDecoder(r.Body).Decode(&user)
@@ -225,6 +233,7 @@ func register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userList[user.Username] = user
+	json.NewEncoder(w).Encode(Response{Success: 1, Message: "Successgully registered"})
 }
 
 func main() {
@@ -236,8 +245,8 @@ func main() {
 	m.Put("/book/:id", http.HandlerFunc(updateBook))
 	m.Del("/book/:id", http.HandlerFunc(deleteBook))
 
-	m.Post("/book/login", http.HandlerFunc(login))
-	m.Post("/book/register", http.HandlerFunc(register))
+	m.Post("/login", http.HandlerFunc(login))
+	m.Post("/register", http.HandlerFunc(register))
 
 	http.Handle("/", m)
 	err := http.ListenAndServe(":8080", nil)
