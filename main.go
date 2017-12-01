@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -43,8 +45,10 @@ func isAuthorized(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
+
 	mu.Lock()
 	defer mu.Unlock()
+
 	sessionID := cookie.Value
 	creden := strings.Split(sessionID, ":")
 	user := creden[0]
@@ -65,26 +69,36 @@ func homePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func addBook(w http.ResponseWriter, r *http.Request) {
-	//fmt.Println("here")
 	if isAuthorized(r) == false {
+
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "No Authorization Provided"})
-		//http.Redirect(w, r, "/home", http.StatusFound)
 		return
 	}
+
 	mu.Lock()
 	defer mu.Unlock()
 
 	var book Book
 	err := json.NewDecoder(r.Body).Decode(&book)
+
 	if err == nil {
+		if book.Name == "" || book.Author == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid/Inefficient information"})
+			return
+		}
+
 		ind++
 		book.Id = ind
 		bookList = append(bookList, book)
+
 		var _Book []Book
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(Response{Success: 1, Message: "Added Book Successfully!", Book: append(_Book, book)})
+
 	} else {
+
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid/Inefficient information"})
 	}
@@ -158,6 +172,7 @@ func updateBook(w http.ResponseWriter, r *http.Request) {
 		if book.Id == id {
 			_ = json.NewDecoder(r.Body).Decode(&bookList[i])
 			bookList[i].Id = id
+
 			var _Book []Book
 			json.NewEncoder(w).Encode(Response{Success: 1, Message: "Updated Book Info Successfully!", Book: append(_Book, bookList[i])})
 			return
@@ -174,7 +189,7 @@ func login(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
 		return
 	}
-	//fmt.Println("meh?")
+
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -187,11 +202,16 @@ func login(w http.ResponseWriter, r *http.Request) {
 			if pass == val.Password {
 
 				sessionid := strconv.Itoa(rand.Intn(1000000007))
-				cookieValue := val.Username + ":" + sessionid
+				hasher := sha1.New()
+				hasher.Write([]byte(sessionid))
+				sha := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
+
+				cookieValue := val.Username + ":" + sha
 				expire := time.Now().AddDate(0, 0, 1)
 				cookie := http.Cookie{Name: "SessionID", Value: cookieValue, Expires: expire, HttpOnly: true}
 				http.SetCookie(w, &cookie)
-				userList[user] = User{val.Username, val.Password, val.Name, sessionid}
+
+				userList[user] = User{val.Username, val.Password, val.Name, sha}
 				json.NewEncoder(w).Encode(Response{Success: 1, Message: "Login Successful"})
 
 			} else {
@@ -208,12 +228,41 @@ func login(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func logout(w http.ResponseWriter, r *http.Request) {
+	if isAuthorized(r) == false {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "You have login first to logout!"})
+		return
+	}
+	cookie, err := r.Cookie("SessionID")
+	if err != nil {
+		return
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	sessionID := cookie.Value
+	creden := strings.Split(sessionID, ":")
+	user := creden[0]
+	val := userList[user]
+
+	sessionid := strconv.Itoa(rand.Intn(1000000007))
+	hasher := sha1.New()
+	hasher.Write([]byte(sessionid))
+	sha := base64.URLEncoding.EncodeToString(hasher.Sum(nil))
+
+	userList[user] = User{val.Username, val.Password, val.Name, sha}
+	json.NewEncoder(w).Encode(Response{Success: 1, Message: "Logged out successfully!"})
+}
+
 func register(w http.ResponseWriter, r *http.Request) {
 	if isAuthorized(r) == true {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Please logout to login again!"})
 		return
 	}
+
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -222,7 +271,12 @@ func register(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid Info"})
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid/Inefficient information"})
+		return
+	}
+	if user.Name == "" || user.Password == "" || user.Name == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(Response{Success: 0, Message: "Invalid/Inefficient information"})
 		return
 	}
 
@@ -240,12 +294,14 @@ func main() {
 
 	m := pat.New()
 	m.Get("/", http.HandlerFunc(homePage))
+
 	m.Get("/book", http.HandlerFunc(showBooks))
-	m.Post("/book/", http.HandlerFunc(addBook))
+	m.Post("/book", http.HandlerFunc(addBook))
 	m.Put("/book/:id", http.HandlerFunc(updateBook))
 	m.Del("/book/:id", http.HandlerFunc(deleteBook))
 
-	m.Post("/login", http.HandlerFunc(login))
+	m.Get("/login", http.HandlerFunc(login))
+	m.Get("/logout", http.HandlerFunc(logout))
 	m.Post("/register", http.HandlerFunc(register))
 
 	http.Handle("/", m)
