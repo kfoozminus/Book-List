@@ -11,6 +11,7 @@ Built in GO (main.go) for managing booklist. It Supports operations -->
 
 ### Docker
 
+```
 1. write the dockerfile
 2. docker build -t kfoozminus/booklistgo:latest .
 3. docker run -d -p 5000:8080 --name book_container kfoozminus/booklistgo --rm
@@ -27,9 +28,11 @@ Built in GO (main.go) for managing booklist. It Supports operations -->
 docker rm $(docker ps -a -q -f status=exited)
 7. docker run -it imagename
 -it flags attaches us to an interactive tty in the container.
+```
 
 ### Kubernetes/Minikube
 
+```
 1. minikube start
 2. kubectl run book-kube --image=kfoozminus/booklistgo:v1 --port=8080
 3. kubectl get deployments
@@ -47,3 +50,4 @@ Updating:
 
 10. kubectl set image deployment/book-kube booklistgo=booklistgo:latest
 11. minikube service book-kube
+```
